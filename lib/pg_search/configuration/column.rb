@@ -28,6 +28,9 @@ module PgSearch
       end
 
       def column_name
+        # query to jsonb columns fails if the column is quoted
+        return @column_name if @column_name.match('->>').present?
+
         @connection.quote_column_name(@column_name)
       end
 

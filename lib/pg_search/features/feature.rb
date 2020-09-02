@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require "active_support/core_ext/module/delegation"
 require "active_support/core_ext/hash/keys"
 
@@ -5,10 +7,10 @@ module PgSearch
   module Features
     class Feature
       def self.valid_options
-        [:only, :sort_only]
+        %i[only sort_only]
       end
 
-      delegate :connection, :quoted_table_name, :to => :'@model'
+      delegate :connection, :quoted_table_name, to: :'@model'
 
       def initialize(query, options, all_columns, model, normalizer)
         @query = query
@@ -23,7 +25,7 @@ module PgSearch
       attr_reader :query, :options, :all_columns, :model, :normalizer
 
       def document
-        columns.map { |column| column.to_sql }.join(" || ' ' || ")
+        columns.map(&:to_sql).join(" || ' ' || ")
       end
 
       def columns

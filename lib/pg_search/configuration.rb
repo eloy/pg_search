@@ -1,10 +1,11 @@
+# frozen_string_literal: true
+
 require "pg_search/configuration/association"
 require "pg_search/configuration/column"
 require "pg_search/configuration/foreign_column"
 
 module PgSearch
   class Configuration
-
     attr_reader :model
 
     def initialize(options, model)
@@ -18,7 +19,7 @@ module PgSearch
       def alias(*strings)
         name = Array(strings).compact.join("_")
         # By default, PostgreSQL limits names to 32 characters, so we hash and limit to 32 characters.
-        "pg_search_#{Digest::SHA2.hexdigest(name)}"[0,32]
+        "pg_search_#{Digest::SHA2.hexdigest(name)}".first(32)
       end
     end
 
@@ -28,6 +29,7 @@ module PgSearch
 
     def regular_columns
       return [] unless options[:against]
+
       Array(options[:against]).map do |column_name, weight|
         Column.new(column_name, weight, model)
       end
@@ -35,6 +37,7 @@ module PgSearch
 
     def associations
       return [] unless options[:associated_against]
+
       options[:associated_against].map do |association, column_names|
         Association.new(model, association, column_names)
       end.flatten
@@ -72,16 +75,12 @@ module PgSearch
       options[:order_within_rank]
     end
 
-    def postgresql_version
-      model.connection.send(:postgresql_version)
-    end
-
     private
 
     attr_reader :options
 
     def default_options
-      {:using => :tsearch}
+      { using: :tsearch }
     end
 
     VALID_KEYS = %w[
@@ -89,8 +88,8 @@ module PgSearch
     ].map(&:to_sym)
 
     VALID_VALUES = {
-      :ignoring => [:accents]
-    }
+      ignoring: [:accents]
+    }.freeze
 
     def assert_valid_options(options)
       unless options[:against] || options[:associated_against]
@@ -101,9 +100,7 @@ module PgSearch
 
       VALID_VALUES.each do |key, values_for_key|
         Array(options[key]).each do |value|
-          unless values_for_key.include?(value)
-            raise ArgumentError, ":#{key} cannot accept #{value}"
-          end
+          raise ArgumentError, ":#{key} cannot accept #{value}" unless values_for_key.include?(value)
         end
       end
     end

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module PgSearch
   class Normalizer
     def initialize(config)
@@ -6,13 +8,6 @@ module PgSearch
 
     def add_normalization(sql_expression)
       return sql_expression unless config.ignore.include?(:accents)
-
-      if config.postgresql_version < 90000
-        raise PgSearch::NotSupportedForPostgresqlVersion.new(<<-MESSAGE.strip_heredoc)
-          Sorry, {:ignoring => :accents} only works in PostgreSQL 9.0 and above.
-          #{config.inspect}
-        MESSAGE
-      end
 
       sql_node = case sql_expression
                  when Arel::Nodes::Node

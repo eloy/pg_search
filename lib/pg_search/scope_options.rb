@@ -1,4 +1,4 @@
-# encoding: UTF-8
+# frozen_string_literal: true
 
 require "active_support/core_ext/module/delegation"
 
@@ -13,47 +13,73 @@ module PgSearch
     end
 
     def apply(scope)
-      unless scope.instance_variable_get(:@pg_search_scope_applied_count)
-        scope = if ::ActiveRecord::VERSION::STRING < "4.0.0"
-                  scope.scoped
-                else
-                  scope.all.spawn
-                end
-      end
-
-      alias_id = scope.instance_variable_get(:@pg_search_scope_applied_count) || 0
-      scope.instance_variable_set(:@pg_search_scope_applied_count, alias_id + 1)
-
-      aka = pg_search_alias scope, alias_id
+      scope = include_table_aliasing_for_rank(scope)
+      rank_table_alias = scope.pg_search_rank_table_alias(:include_counter)
 
       scope
-        .joins(rank_join(aka))
-        .order("#{aka}.rank DESC, #{order_within_rank}")
-        .extend(DisableEagerLoading)
+        .joins(rank_join(rank_table_alias))
+        .order(Arel.sql("#{rank_table_alias}.rank DESC, #{order_within_rank}"))
         .extend(WithPgSearchRank)
+        .extend(WithPgSearchHighlight[feature_for(:tsearch)])
     end
 
-    # workaround for https://github.com/Casecommons/pg_search/issues/14
-    module DisableEagerLoading
-      def eager_loading?
-        return false
+    module WithPgSearchHighlight
+      def self.[](tsearch)
+        Module.new do
+          include WithPgSearchHighlight
+          define_method(:tsearch) { tsearch }
+        end
+      end
+
+      def tsearch
+        raise TypeError, "You need to instantiate this module with []"
+      end
+
+      def with_pg_search_highlight
+        scope = self
+        scope.select(pg_search_highlight_field)
+      end
+
+      def pg_search_highlight_field
+        "(#{highlight}) AS pg_search_highlight, #{table_name}.*"
+      end
+
+      def highlight
+        tsearch.highlight.to_sql
       end
     end
 
     module WithPgSearchRank
       def with_pg_search_rank
         scope = self
-        scope = scope.select("*") unless scope.select_values.any?
-        arel_table = scope.instance_variable_get(:@table)
-        aka = "pg_search_#{arel_table.name}"
+        scope = scope.select("#{table_name}.*") unless scope.select_values.any?
+        scope.select("#{pg_search_rank_table_alias}.rank AS pg_search_rank")
+      end
+    end
 
-        scope.select("#{aka}.rank AS pg_search_rank")
+    module PgSearchRankTableAliasing
+      def pg_search_rank_table_alias(include_counter = false)
+        components = [arel_table.name]
+        if include_counter
+          count = increment_counter
+          components << count if count > 0
+        end
+
+        Configuration.alias(components)
+      end
+
+      private
+
+      def increment_counter
+        @counter ||= 0
+      ensure
+        @counter += 1
       end
     end
 
     private
 
-    delegate :connection, :quoted_table_name, :to => :model
+    delegate :connection, :quoted_table_name, to: :model
 
     def subquery
       model
@@ -67,13 +93,10 @@ module PgSearch
     end
 
     def conditions
-      config.features.reject do |feature_name, feature_options|
-        feature_options && feature_options[:sort_only]
-      end.map do |feature_name, feature_options|
-        feature_for(feature_name).conditions
-      end.inject do |accumulator, expression|
-        Arel::Nodes::Or.new(accumulator, expression)
-      end.to_sql
+      config.features
+            .reject { |_feature_name, feature_options| feature_options && feature_options[:sort_only] }
+            .map { |feature_name, _feature_options| feature_for(feature_name).conditions }
+            .inject { |accumulator, expression| Arel::Nodes::Or.new(accumulator, expression) }
     end
 
     def order_within_rank
@@ -93,16 +116,16 @@ module PgSearch
     end
 
     FEATURE_CLASSES = {
-      :dmetaphone => Features::DMetaphone,
-      :tsearch => Features::TSearch,
-      :trigram => Features::Trigram
-    }
+      dmetaphone: Features::DMetaphone,
+      tsearch: Features::TSearch,
+      trigram: Features::Trigram
+    }.freeze
 
     def feature_for(feature_name)
       feature_name = feature_name.to_sym
       feature_class = FEATURE_CLASSES[feature_name]
 
-      raise ArgumentError.new("Unknown feature: #{feature_name}") unless feature_class
+      raise ArgumentError, "Unknown feature: #{feature_name}" unless feature_class
 
       normalizer = Normalizer.new(config)
 
@@ -117,19 +140,20 @@ module PgSearch
 
     def rank
       (config.ranking_sql || ":tsearch").gsub(/:(\w*)/) do
-        feature_for($1).rank.to_sql
+        feature_for(Regexp.last_match(1)).rank.to_sql
       end
     end
 
-    def pg_search_alias(scope, n)
-      arel_table = scope.instance_variable_get(:@table)
-      prefix = "pg_search_#{arel_table.name}"
-
-      0 == n ? prefix : "#{prefix}_#{n}"
+    def rank_join(rank_table_alias)
+      "INNER JOIN (#{subquery.to_sql}) AS #{rank_table_alias} ON #{primary_key} = #{rank_table_alias}.pg_search_id"
     end
 
-    def rank_join(aka)
-      "INNER JOIN (#{subquery.to_sql}) #{aka} ON #{primary_key} = #{aka}.pg_search_id"
+    def include_table_aliasing_for_rank(scope)
+      return scope if scope.included_modules.include?(PgSearchRankTableAliasing)
+
+      scope.all.spawn.tap do |new_scope|
+        new_scope.class_eval { include PgSearchRankTableAliasing }
+      end
     end
   end
 end

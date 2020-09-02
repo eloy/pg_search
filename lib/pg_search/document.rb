@@ -1,14 +1,13 @@
+# frozen_string_literal: true
+
 require 'logger'
 
 module PgSearch
   class Document < ActiveRecord::Base
-    include PgSearch
+    include PgSearch::Model
 
     self.table_name = 'pg_search_documents'
-    belongs_to :searchable, :polymorphic => true
-
-    before_validation :update_content,
-                      :unless => Proc.new { |doc| doc.searchable.nil? }
+    belongs_to :searchable, polymorphic: true
 
     # The logger might not have loaded yet.
     # https://github.com/Casecommons/pg_search/issues/26
@@ -20,18 +19,10 @@ module PgSearch
       options = if PgSearch.multisearch_options.respond_to?(:call)
                   PgSearch.multisearch_options.call(*args)
                 else
-                  {:query => args.first}.merge(PgSearch.multisearch_options)
+                  { query: args.first }.merge(PgSearch.multisearch_options)
                 end
 
-      {:against => :content}.merge(options)
+      { against: :content }.merge(options)
     }
-
-    private
-
-    def update_content
-      methods = Array(searchable.pg_search_multisearchable_options[:against])
-      searchable_text = methods.map { |symbol| searchable.send(symbol) }.join(" ")
-      self.content = searchable_text
-    end
   end
 end

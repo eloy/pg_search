@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module PgSearch
-  VERSION = "1.0.4".freeze
+  VERSION = '2.3.2'
 end

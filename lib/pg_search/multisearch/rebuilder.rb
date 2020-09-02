@@ -1,10 +1,10 @@
+# frozen_string_literal: true
+
 module PgSearch
   module Multisearch
     class Rebuilder
       def initialize(model, time_source = Time.method(:now))
-        unless model.respond_to?(:pg_search_multisearchable_options)
-          raise ModelNotMultisearchable.new(model)
-        end
+        raise ModelNotMultisearchable, model unless model.respond_to?(:pg_search_multisearchable_options)
 
         @model = model
         @time_source = time_source
@@ -13,8 +13,8 @@ module PgSearch
       def rebuild
         if model.respond_to?(:rebuild_pg_search_documents)
           model.rebuild_pg_search_documents
-        elsif conditional? || dynamic?
-          model.find_each { |record| record.update_pg_search_document }
+        elsif conditional? || dynamic? || additional_attributes?
+          model.find_each(&:update_pg_search_document)
         else
           model.connection.execute(rebuild_sql)
         end
@@ -33,6 +33,10 @@ module PgSearch
         columns.any? { |column| !column_names.include?(column.to_s) }
       end
 
+      def additional_attributes?
+        model.pg_search_multisearchable_options.key?(:additional_attributes)
+      end
+
       def connection
         model.connection
       end
@@ -42,7 +46,7 @@ module PgSearch
       end
 
       def rebuild_sql_template
-         <<-SQL.strip_heredoc
+        <<-SQL.strip_heredoc
           INSERT INTO :documents_table (searchable_type, searchable_id, content, created_at, updated_at)
             SELECT :base_model_name AS searchable_type,
                    :model_table.#{primary_key} AS searchable_id,
@@ -65,9 +69,7 @@ module PgSearch
         clause = ""
         if model.column_names.include? model.inheritance_column
           clause = "WHERE"
-          if model.base_class == model
-            clause = "#{clause} #{model.inheritance_column} IS NULL OR"
-          end
+          clause = "#{clause} #{model.inheritance_column} IS NULL OR" if model.base_class == model
           clause = "#{clause} #{model.inheritance_column} = #{model_name}"
         end
         clause
@@ -78,9 +80,9 @@ module PgSearch
       end
 
       def content_expressions
-        columns.map { |column|
-          %Q{coalesce(:model_table.#{column}::text, '')}
-        }.join(" || ' ' || ")
+        columns.map do |column|
+          %{coalesce(:model_table.#{connection.quote_column_name(column)}::text, '')}
+        end.join(" || ' ' || ")
       end
 
       def columns

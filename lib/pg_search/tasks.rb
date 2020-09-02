@@ -1,14 +1,18 @@
+# frozen_string_literal: true
+
 require 'rake'
 require 'pg_search'
 
 namespace :pg_search do
   namespace :multisearch do
     desc "Rebuild PgSearch multisearch records for a given model"
-    task :rebuild, [:model,:schema] => :environment do |task, args|
+    task :rebuild, %i[model schema] => :environment do |_task, args|
       raise ArgumentError, <<-MESSAGE.strip_heredoc unless args.model
+
         You must pass a model as an argument.
         Example: rake pg_search:multisearch:rebuild[BlogPost]
       MESSAGE
+
       model_class = args.model.classify.constantize
       connection = PgSearch::Document.connection
       original_schema_search_path = connection.schema_search_path
